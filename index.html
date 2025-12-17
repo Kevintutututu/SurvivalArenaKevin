@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Survival Arena</title>
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;500;700;900&display=swap" rel="stylesheet">
+</head>
+
+<body>
+  <div class="main-layout">
+    <!-- Game Area -->
+    <div id="game-container">
+      <canvas id="gameCanvas"></canvas>
+
+      <!-- HUD -->
+      <div id="hud" class="hidden">
+        <!-- Top Bar -->
+        <div class="hud-top">
+          <div class="hud-left">
+            <div class="hud-item wave-item">
+              <span class="label">VAGUE</span>
+              <span id="waveValue">1</span>
+            </div>
+            <div class="hud-item kill-item-total">
+              <span class="label">TOTAL TUÉS</span>
+              <span id="sessionKillsValue">0</span>
+            </div>
+            <!-- Wave Progress -->
+            <div class="hud-item kill-item-wave">
+              <span class="label">PROGRESSION</span>
+              <div class="wave-progress-text">
+                <span id="killsValue">0</span> / <span id="totalEnemiesValue">0</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="hud-center">
+            <div class="xp-container">
+              <div class="xp-bar-bg">
+                <div id="xpBarFill" class="xp-bar-fill"></div>
+              </div>
+              <div class="xp-text">NIV. <span id="levelValue">1</span></div>
+            </div>
+          </div>
+
+          <div class="hud-right">
+            <div class="hud-item gold-item">
+              <span class="label">OR</span>
+              <span id="goldValue">0</span>
+            </div>
+
+            <div id="profile-display" class="hud-item profile-item">
+              <span class="label">COMPTE</span>
+              <span id="playerPseudo">INVITÉ</span>
+            </div>
+
+            <button id="monsterListBtn" class="hud-btn-small">
+              BESTIAIRE
+            </button>
+
+            <button id="ingameShopBtn" class="hud-btn">
+              MARCHÉ <span class="hotkey">[ESPACE]</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Login Screen -->
+      <div id="login-screen" class="screen">
+        <h1 class="title">SURVIVAL <span class="highlight">ARENA</span></h1>
+        <div class="login-container">
+          <h2>IDENTIFICATION</h2>
+          <div class="input-group">
+            <input type="text" id="loginPseudo" placeholder="PSEUDO (MAX 12)" maxlength="12"
+              style="text-transform:uppercase;">
+          </div>
+
+          <div id="pin-section" class="hidden">
+            <p id="pin-instruction">Entrez votre code PIN (4 chiffres)</p>
+            <input type="password" id="loginPin" placeholder="PIN" maxlength="4">
+            <div id="pin-confirm-section" class="hidden">
+              <input type="password" id="loginPinConfirm" placeholder="CONFIRMER PIN" maxlength="4">
+            </div>
+          </div>
+
+          <p id="login-error" class="error-msg"></p>
+          <button id="loginBtn" class="primary-btn">CONNEXION</button>
+        </div>
+      </div>
+
+      <!-- Profile Modal -->
+      <div id="profile-modal" class="screen hidden">
+        <h2>PROFIL COMPTE</h2>
+        <div class="profile-content">
+          <div class="profile-stats">
+            <h3>PSEUDO: <span id="profileName" class="highlight"></span></h3>
+            <p>Meilleur Score (Kills): <span id="profileBestScore">0</span></p>
+            <p>Total Parties: <span id="profileTotalGames">0</span></p>
+          </div>
+
+          <div class="history-section">
+            <h3>HISTORIQUE (10 DERNIÈRES)</h3>
+            <ul id="matchHistoryList" class="ranking-list">
+              <!-- Populated by JS -->
+            </ul>
+          </div>
+        </div>
+        <button id="closeProfileBtn" class="primary-btn">FERMER</button>
+      </div>
+
+      <!-- Monster List Modal -->
+      <div id="monster-list-modal" class="screen hidden">
+        <h2>BESTIAIRE</h2>
+        <div id="monster-grid" class="monster-grid"></div>
+        <button id="closeMonsterListBtn" class="primary-btn">FERMER</button>
+      </div>
+
+      <!-- Countdown Overlay -->
+      <div id="countdown-overlay" class="overlay hidden">
+        <div class="countdown-number" id="countdownValue">3</div>
+      </div>
+
+      <!-- Start Screen (After Login) -->
+      <div id="start-screen" class="screen hidden">
+        <h1 class="title">SURVIVAL <span class="highlight">ARENA</span></h1>
+
+        <div class="controls-info">
+          <div class="control-group">
+            <h3>DÉPLACEMENT</h3>
+            <p>ZQSD / FLÈCHES</p>
+          </div>
+          <div class="control-group">
+            <h3>ACTION</h3>
+            <p>SHIFT : DASH</p>
+          </div>
+          <div class="control-group">
+            <h3>MARCHÉ</h3>
+            <p>ESPACE</p>
+          </div>
+        </div>
+
+        <button id="startBtn" class="primary-btn">JOUER</button>
+      </div>
+
+      <!-- Shop Screen -->
+      <div id="shop-screen" class="screen hidden">
+        <h2 class="screen-title">MARCHÉ</h2>
+        <div class="stats-summary">
+          <span>OR: <b id="shopGold">0</b></span>
+        </div>
+
+        <div class="upgrades-grid" id="upgradesGrid">
+          <!-- Upgrades injected via JS -->
+        </div>
+
+        <button id="nextWaveBtn" class="primary-btn">VAGUE SUIVANTE</button>
+      </div>
+
+      <!-- Game Over Screen -->
+      <div id="game-over-screen" class="screen hidden">
+        <h1 class="game-over-title">GAME OVER</h1>
+        <div class="final-stats">
+          <p class="final-stat-big"><span id="finalKills">0</span> VICTIMES</p>
+        </div>
+        <button id="restartBtn" class="primary-btn">REJOUER</button>
+      </div>
+    </div>
+
+    <!-- Sidebar -->
+    <aside class="game-info-panel">
+      <!-- Top Half: Rankings -->
+      <div id="ranking-container">
+        <div class="ranking-header">
+          <h2>CLASSEMENT</h2>
+        </div>
+
+        <div class="ranking-content">
+          <div class="ranking-section">
+            <h3>TOP TUEURS (PARTIE)</h3>
+            <ul class="ranking-list" id="rank-game">
+              <li><span>1. Tueur99</span> <span>150</span></li>
+              <li><span>2. AlphaWolf</span> <span>120</span></li>
+              <li><span>3. ProGamer</span> <span>100</span></li>
+              <li><span>4. NoobSlayer</span> <span>85</span></li>
+              <li><span>5. SurvivorX</span> <span>50</span></li>
+              <li><span>6. Bot001</span> <span>40</span></li>
+              <li><span>7. TestUser</span> <span>30</span></li>
+              <li><span>8. RandomGuy</span> <span>25</span></li>
+            </ul>
+          </div>
+
+          <div class="ranking-section">
+            <h3>LÉGENDES (TOTAL)</h3>
+            <ul class="ranking-list" id="rank-total">
+              <li><span>1. Blade</span> <span>2500</span></li>
+              <li><span>2. Reaper</span> <span>2100</span></li>
+              <li><span>3. Shadow</span> <span>1850</span></li>
+              <li><span>4. Viper</span> <span>1600</span></li>
+              <li><span>5. Ghost</span> <span>1450</span></li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <!-- Bottom Half: Chat -->
+      <div id="chat-container">
+        <div class="chat-header">
+          <h2>DISCUSSSION</h2>
+        </div>
+        <div id="chat-messages" class="chat-messages">
+          <!-- Messages will appear here -->
+          <div class="chat-msg system">Bienvenue dans l'arène !</div>
+        </div>
+        <div class="chat-input-area">
+          <input type="text" id="chatInput" placeholder="Message (max 100 car.)" maxlength="100">
+          <button id="chatSendBtn">Envoyer</button>
+        </div>
+      </div>
+    </aside>
+    </aside>
+  </div>
+
+  <!-- Scrolling Footer -->
+  <div class="scrolling-footer">
+    <div class="scrolling-content">Ce jeu vous est proposé par Kevin Couëdro • Ce jeu vous est proposé par Kevin Couëdro
+      • Ce jeu vous est proposé par Kevin Couëdro •</div>
+  </div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+
+</html>
