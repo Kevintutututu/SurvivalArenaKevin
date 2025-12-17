@@ -1,6 +1,6 @@
 import './style.css'
 import { db } from './firebase.js';
-import { collection, doc, setDoc, getDoc, updateDoc, increment, addDoc, query, orderBy, limit, onSnapshot, serverTimestamp, getDocs } from "firebase/firestore";
+import { collection, doc, setDoc, getDoc, updateDoc, increment, addDoc, query, orderBy, limit, onSnapshot, serverTimestamp, getDocs, where } from "firebase/firestore";
 
 
 // --- CONFIGURATION & CONSTANTS ---
@@ -27,7 +27,7 @@ const CONF = {
     TYPE5: { color: '#ff00ff', radius: 10, hp: 40, speed: 1.1, score: 40, gold: 2, name: "Spectre", desc: "Se téléporte aléatoirement." },
     TYPE6: { color: 'rgba(200, 200, 255, 0.4)', radius: 12, hp: 60, speed: 1.65, score: 60, gold: 4, phase: true, name: "Fantôme", desc: "Invulnérable quand tu bouges !" },
     TYPE7: { color: '#ff0000', radius: 14, hp: 50, speed: 0.55, score: 45, gold: 5, name: "Laser", desc: "Charge un rayon mortel global." },
-    BOSS: { color: '#ffffff', radius: 40, hp: 8000, speed: 0.88, score: 500, gold: 50, name: "RSB-01", desc: "Le patron ultime." },
+    BOSS: { color: '#ffffff', radius: 40, hp: 1000, speed: 0.88, score: 500, gold: 50, name: "RSB-01", desc: "Le patron ultime." },
   },
   WAVE: {
     baseCount: 15,
@@ -300,10 +300,10 @@ class Player {
     let dx = 0;
     let dy = 0;
 
-    if (keys['ArrowUp'] || keys['w']) dy = -1;
-    if (keys['ArrowDown'] || keys['s']) dy = 1;
-    if (keys['ArrowLeft'] || keys['a']) dx = -1;
-    if (keys['ArrowRight'] || keys['d']) dx = 1;
+    if (keys['ArrowUp'] || keys['KeyW']) dy = -1;
+    if (keys['ArrowDown'] || keys['KeyS']) dy = 1;
+    if (keys['ArrowLeft'] || keys['KeyA']) dx = -1;
+    if (keys['ArrowRight'] || keys['KeyD']) dx = 1;
 
     this.isMoving = (dx !== 0 || dy !== 0);
 
@@ -651,23 +651,25 @@ class UserManager {
     if (!pseudo) return;
 
     try {
-      // Update User Stats (Best Score & Total Games)
+      // Update User Stats (Best Score & Total Games & Total Kills)
       const userRef = doc(db, "users", pseudo);
       const userSnap = await getDoc(userRef);
 
       if (userSnap.exists()) {
         const data = userSnap.data();
         const updates = {
-          totalGames: increment(1)
+          totalGames: increment(1),
+          totalKills: increment(kills) // CUMULATIVE KILLS
         };
         if (kills > (data.bestScore || 0)) {
           updates.bestScore = kills;
         }
         await updateDoc(userRef, updates);
 
-        // Update local currentUser if it matches
+        // Update local currentUser
         if (this.currentUser && this.currentUser.pseudo === pseudo) {
           this.currentUser.totalGames = (this.currentUser.totalGames || 0) + 1;
+          this.currentUser.totalKills = (this.currentUser.totalKills || 0) + kills;
           if (kills > this.currentUser.bestScore) this.currentUser.bestScore = kills;
         }
       }
@@ -686,64 +688,53 @@ class UserManager {
   }
 
   async getStats(pseudo) {
+    let userData = null;
+    let history = [];
+
+    // 1. Fetch User Data
     try {
       const docRef = doc(db, "users", pseudo);
       const docSnap = await getDoc(docRef);
-      if (!docSnap.exists()) return null;
+      if (docSnap.exists()) {
+        userData = docSnap.data();
+      } else {
+        return null;
+      }
+    } catch (e) {
+      console.error("Error fetching user data:", e);
+      return null;
+    }
 
-      const userData = docSnap.data();
+    // 2. Fetch History (Client-side filter to avoid Index Requirement)
+    try {
+      // Fetch specifically only this user's games if index exists, 
+      // otherwise we might need index.
+      // TRICK: To avoid "Missing Index" on (pseudo + date), we fetch global recent games 
+      // and filter. LIMIT 100 should be enough for a small user base to find recent games.
+      // LONG TERM: User must create the index in Firebase Console.
 
-      // Get last 10 games
       const q = query(
         collection(db, "games"),
         orderBy("date", "desc"),
-        limit(10)
+        limit(100)
       );
-      // Optimized: We ideally just want THIS user's games. 
-      // V1: We'll filter client side or compound query if index exists. 
-      // Simple approach for V1 without complex index setup: Query all, filter client side (bad for scale, good for prototype)
-      // BETTER: Use where("pseudo", "==", pseudo)
-      // Needs index: "games" -> pseudo asc, date desc.
-      // Let's assume index might be missing and just fetch last 20 global games and filter, OR simply fetch all recent games of user if I add index.
-      // Let's try separate query with where. If index error, console will say.
+      const snap = await getDocs(q);
 
-      // Fallback: simplified history (only locally stored in user obj not available in V1 DB structure I proposed? 
-      // I proposed separate collection. Let's do a simple subcollection or just query.
-      // Let's go with a where query.
+      // Filter in JS
+      const allGames = [];
+      snap.forEach(doc => allGames.push(doc.data()));
+      history = allGames.filter(g => g.pseudo === pseudo).slice(0, 10);
 
-      // To be safe against "Missing Index" error which stops the app, let's wrap or simplify.
-      // Actually, for V1, let's just stick to User Data stats + maybe stored local history? 
-      // No, user wants DB. 
-      // Let's try to query 'games' where pseudo == pseudo. 
-      // IF it fails, returns empty.
-
-      /* 
-      const qGames = query(collection(db, "games"), where("pseudo", "==", pseudo), orderBy("date", "desc"), limit(10));
-      */
-
-      // For now, let's just return basic stats. 
-      // If user insists on history, we will add it. 
-      // I will leave history array empty for now to avoid crashes until I set up the index.
-
-      return {
-        bestScore: userData.bestScore || 0,
-        totalGames: userData.totalGames || 0,
-        history: [] // Pending Index Creation
-      };
     } catch (e) {
-      console.log(e);
-      return null;
+      console.warn("History fetch failed:", e);
     }
-  }
 
-  // Explicit History fetch that handles potential index errors gracefully
-  async getHistory(pseudo) {
-    try {
-      // We need `import { where } ...` 
-      // Adding `where` to imports line above implicitly via the replace block? No, I need to add it explicitly.
-      // I'll skip complex query for this step to ensure stability.
-      return [];
-    } catch (e) { return []; }
+    return {
+      bestScore: userData.bestScore || 0,
+      totalGames: userData.totalGames || 0,
+      totalKills: userData.totalKills || 0,
+      history: history
+    };
   }
 }
 
@@ -955,7 +946,7 @@ class Game {
 
   setupInput() {
     window.addEventListener('keydown', e => {
-      if (document.activeElement === $('#chatInput')) return; // No game input if chatting
+      if (document.activeElement === $('#chatInput')) return;
 
       if (e.key === 'Shift') {
         if (this.player && !this.player.isDead) {
@@ -963,9 +954,10 @@ class Game {
         }
       }
       if (e.code === 'Space') return;
-      this.keys[e.key] = true;
+
+      this.keys[e.code] = true; // Use Code to ignore CapsLock/Layout shifts
     });
-    window.addEventListener('keyup', e => this.keys[e.key] = false);
+    window.addEventListener('keyup', e => this.keys[e.code] = false);
     window.addEventListener('resize', () => this.resize());
   }
 
@@ -1017,9 +1009,13 @@ class Game {
     this.upgrades.forEach(u => this.shopLevels[u.id] = 1);
     this.healthDroppedInWave = false;
 
+    // Reset Score Saved Flag
+    this.scoreSaved = false;
+
     this.xp = 0;
     this.level = 1;
     this.xpToNextLevel = 100;
+    this.wave = 1;
 
     this.startGame();
   }
@@ -1417,77 +1413,142 @@ class Game {
   }
 
   async updateLeaderboard() {
-    // Clear dummy data first
-    const topList = $('#topKillList');
-    const legendsList = $('#legendKillList');
-    if (topList) topList.innerHTML = '<li style="color:#555; text-align:center;">Chargement...</li>';
-    if (legendsList) legendsList.innerHTML = '<li style="color:#555; text-align:center;">Chargement...</li>';
+    // #rank-game = "TOP TUEURS (PARTIE)" -> We want BEST SCORE (Unique Player)
+    // #rank-total = "LÉGENDES (TOTAL)" -> We want TOTAL KILLS (Cumulative)
 
+    const bestScoreList = $('#rank-game');
+    const totalKillsList = $('#rank-total');
+
+    if (bestScoreList) bestScoreList.innerHTML = '<li style="color:#888; text-align:center;">Chargement...</li>';
+    if (totalKillsList) totalKillsList.innerHTML = '<li style="color:#888; text-align:center;">Chargement...</li>';
+
+    // 1. TOP TUEURS (Best Score Unique)
     try {
-      // Fetch Legends (Best Score overall)
-      // Index needed: users -> bestScore desc
-      // For V1 without index, we might get error or limited data.
-      // Let's safe query with limit.
-      const q = query(collection(db, "users"), orderBy("bestScore", "desc"), limit(10));
+      const q = query(collection(db, "users"), orderBy("bestScore", "desc"), limit(8));
       const snap = await getDocs(q);
 
-      if (legendsList) {
-        legendsList.innerHTML = '';
-        let rank = 1;
-        snap.forEach(doc => {
-          const d = doc.data();
-          if (d.bestScore > 0) {
-            const li = document.createElement('li');
-            li.innerHTML = `<span>${rank}. ${d.pseudo}</span> <span>${d.bestScore}</span>`;
-            legendsList.appendChild(li);
-            rank++;
-          }
-        });
-        if (rank === 1) legendsList.innerHTML = '<li style="color:#555; text-align:center;">Aucun score.</li>';
+      if (bestScoreList) {
+        bestScoreList.innerHTML = '';
+        if (snap.empty) {
+          bestScoreList.innerHTML = '<li style="color:#555; text-align:center;">Aucun score.</li>';
+        } else {
+          let rank = 1;
+          snap.forEach(doc => {
+            const d = doc.data();
+            if ((d.bestScore || 0) > 0) {
+              const li = document.createElement('li');
+              li.innerHTML = `<span>${rank}. ${d.pseudo}</span> <span>${d.bestScore}</span>`;
+              bestScoreList.appendChild(li);
+              rank++;
+            }
+          });
+        }
       }
-
-      // Current Game Rankings?
-      // Since it's single player, "TOP TUEURS (PARTIE)" doesn't make much sense unless it's a daily leaderboard?
-      // Let's repurpose it to "DERNIÈRES PARTIES" (Global History)?
-      // Or just leave it empty for now as requested "seulement ceux des nouveaux joueur".
-
-      // Let's make TOP TUEURS reflect the "Parties Récentes" globally (Games collection)
-      // Games -> orderBy date desc limit 10
-      const qGames = query(collection(db, "games"), orderBy("date", "desc"), limit(10));
-      const snapGames = await getDocs(qGames);
-
-      if (topList) {
-        topList.innerHTML = '';
-        snapGames.forEach(doc => {
-          const d = doc.data();
-          const li = document.createElement('li');
-          // Create rank style or just list
-          li.innerHTML = `<span>${d.pseudo}</span> <span>${d.kills}</span>`;
-          topList.appendChild(li);
-        });
-        if (snapGames.empty) topList.innerHTML = '<li style="color:#555; text-align:center;">Aucune partie.</li>';
-      }
-
     } catch (e) {
-      console.error("Leaderboard error (Index missing?):", e);
-      if (legendsList) legendsList.innerHTML = '<li style="color:#555; font-size:0.8rem;">Index Firestore manquant.</li>';
+      console.error("Best Score Error:", e);
+      if (bestScoreList) bestScoreList.innerHTML = '<li style="color:red; font-size:0.7rem;">Erreur index (bestScore).</li>';
+    }
+
+    // 2. LÉGENDES (Total Kills Cumulative)
+    // We need an index on 'totalKills' desc.
+    try {
+      const q2 = query(collection(db, "users"), orderBy("totalKills", "desc"), limit(5));
+      const snap2 = await getDocs(q2);
+
+      if (totalKillsList) {
+        totalKillsList.innerHTML = '';
+        if (snap2.empty) {
+          totalKillsList.innerHTML = '<li style="color:#555; text-align:center;">Aucune légende.</li>';
+        } else {
+          let rank = 1;
+          snap2.forEach(doc => {
+            const d = doc.data();
+            // Show only if they have kills
+            if ((d.totalKills || 0) > 0) {
+              const li = document.createElement('li');
+              li.innerHTML = `<span>${rank}. ${d.pseudo}</span> <span>${d.totalKills}</span>`;
+              totalKillsList.appendChild(li);
+              rank++;
+            }
+          });
+        }
+      }
+    } catch (e) {
+      console.error("Total Kills Error:", e);
+      if (totalKillsList) totalKillsList.innerHTML = '<li style="color:red; font-size:0.7rem;">Erreur index (totalKills).</li>';
     }
   }
 
-  onLoginSuccess() {
-    $('#login-screen').classList.add('hidden');
-    $('#start-screen').classList.remove('hidden');
-    $('#playerPseudo').innerText = this.userManager.currentUser.pseudo;
-    this.state = 'MENU';
-    this.updateLeaderboard(); // Fetch real scores
+  closeProfile() {
+    const modal = $('#profile-modal');
+    if (modal) modal.classList.add('hidden');
+
+    // Resume logic
+    if (this.player && !this.player.isDead) {
+      this.state = 'PLAYING';
+    } else {
+      // If we are in menu (no player), stay in MENU
+      this.state = 'MENU';
+    }
   }
 
-  closeProfile() {
-    $('#profile-modal').classList.add('hidden');
-    if (this.player && !this.player.isDead) this.state = 'PLAYING';
-    else this.state = 'MENU';
 
-    if (!this.player) $('#start-screen').classList.remove('hidden');
+  // Re-verify openProfile isn't broken
+  async openProfile() {
+    if (!this.userManager.currentUser) return;
+    const modal = $('#profile-modal');
+    const currentUser = this.userManager.currentUser;
+
+    // Basic Fill
+    const pStats = modal.querySelector('.profile-stats');
+    if (pStats) {
+      pStats.innerHTML = `
+              <h3>INFO JOUEUR</h3>
+              <div class="stat-block"><span style="font-size:0.8rem; color:#888;">PSEUDO</span><span class="stat-value highlight">${currentUser.pseudo}</span></div>
+              <div style="text-align:center; margin-top:10px; color:#666;">Récupération stats...</div>
+          `;
+    }
+
+    modal.classList.remove('hidden');
+    this.state = 'PAUSED';
+
+    // Async Fetch
+    const stats = await this.userManager.getStats(currentUser.pseudo);
+
+    if (pStats && stats) {
+      pStats.innerHTML = `
+              <h3>INFO JOUEUR</h3>
+              <div class="stat-block">
+                  <span style="font-size:0.8rem; color:#888;">PSEUDO</span>
+                  <span class="stat-value highlight">${currentUser.pseudo}</span>
+              </div>
+              <div class="stat-block">
+                  <span style="font-size:0.8rem; color:#888;">MEILLEUR SCORE</span>
+                  <span class="stat-value">${stats.bestScore}</span>
+              </div>
+              <div class="stat-block">
+                  <span style="font-size:0.8rem; color:#888;">PARTIES JOUÉES</span>
+                  <span class="stat-value">${stats.totalGames}</span>
+              </div>
+          `;
+    }
+
+    // History
+    const hList = $('#matchHistoryList');
+    if (hList) {
+      hList.innerHTML = '';
+      if (stats && stats.history && stats.history.length > 0) {
+        stats.history.forEach(m => {
+          const li = document.createElement('li');
+          const date = m.date && m.date.toDate ? m.date.toDate() : new Date();
+          const dStr = `${date.getDate()}/${date.getMonth() + 1}`;
+          li.innerHTML = `<span>${dStr}</span> <span>Vague ${m.wave} • <span style="color:#00f0ff">${m.kills} Kills</span></span>`;
+          hList.appendChild(li);
+        });
+      } else {
+        hList.innerHTML = '<li style="justify-content:center; color:#555;">Aucun historique.</li>';
+      }
+    }
   }
 
   spawnParticles(x, y, color, count) {
@@ -1716,6 +1777,7 @@ class Game {
       if (this.userManager.currentUser && !this.scoreSaved) {
         this.userManager.addMatch(this.userManager.currentUser.pseudo, this.kills, this.wave);
         this.scoreSaved = true;
+        this.updateLeaderboard(); // Refresh UI immediately
       }
     }
 
