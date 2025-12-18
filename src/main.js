@@ -1456,70 +1456,74 @@ class Game {
     }
   }
 
-  async updateLeaderboard() {
-    // #rank-game = "TOP TUEURS (PARTIE)" -> We want BEST SCORE (Unique Player)
-    // #rank-total = "LÉGENDES (TOTAL)" -> We want TOTAL KILLS (Cumulative)
+  updateLeaderboard() {
+    // REAL-TIME UPDATES via onSnapshot
+    // We replace getDocs with onSnapshot listeners.
 
     const bestScoreList = $('#rank-game');
     const totalKillsList = $('#rank-total');
 
-    if (bestScoreList) bestScoreList.innerHTML = '<li style="color:#888; text-align:center;">Chargement...</li>';
-    if (totalKillsList) totalKillsList.innerHTML = '<li style="color:#888; text-align:center;">Chargement...</li>';
+    if (bestScoreList && bestScoreList.innerHTML.includes('Chargement')) bestScoreList.innerHTML = '<li style="color:#888; text-align:center;">Chargement...</li>';
+    if (totalKillsList && totalKillsList.innerHTML.includes('Chargement')) totalKillsList.innerHTML = '<li style="color:#888; text-align:center;">Chargement...</li>';
+
+    // Unsubscribe previous listeners if any (to prevent duplicates)
+    if (this.unsubBest) this.unsubBest();
+    if (this.unsubTotal) this.unsubTotal();
 
     // 1. TOP TUEURS (Best Score Unique)
     try {
       const q = query(collection(db, "users"), orderBy("bestScore", "desc"), limit(8));
-      const snap = await getDocs(q);
-
-      if (bestScoreList) {
-        bestScoreList.innerHTML = '';
-        if (snap.empty) {
-          bestScoreList.innerHTML = '<li style="color:#555; text-align:center;">Aucun score.</li>';
-        } else {
-          let rank = 1;
-          snap.forEach(doc => {
-            const d = doc.data();
-            if ((d.bestScore || 0) > 0) {
-              const li = document.createElement('li');
-              li.innerHTML = `<span>${rank}. ${d.pseudo}</span> <span>${d.bestScore}</span>`;
-              bestScoreList.appendChild(li);
-              rank++;
-            }
-          });
+      this.unsubBest = onSnapshot(q, (snap) => {
+        if (bestScoreList) {
+          bestScoreList.innerHTML = '';
+          if (snap.empty) {
+            bestScoreList.innerHTML = '<li style="color:#555; text-align:center;">Aucun score.</li>';
+          } else {
+            let rank = 1;
+            snap.forEach(doc => {
+              const d = doc.data();
+              if ((d.bestScore || 0) > 0) {
+                const li = document.createElement('li');
+                li.innerHTML = `<span>${rank}. ${d.pseudo}</span> <span>${d.bestScore}</span>`;
+                bestScoreList.appendChild(li);
+                rank++;
+              }
+            });
+          }
         }
-      }
+      }, (error) => {
+        console.error("Best Score RT Error:", error);
+      });
     } catch (e) {
-      console.error("Best Score Error:", e);
-      if (bestScoreList) bestScoreList.innerHTML = '<li style="color:red; font-size:0.7rem;">Erreur index (bestScore).</li>';
+      console.error("Setup Best Score Listener Error:", e);
     }
 
     // 2. LÉGENDES (Total Kills Cumulative)
-    // We need an index on 'totalKills' desc.
     try {
       const q2 = query(collection(db, "users"), orderBy("totalKills", "desc"), limit(5));
-      const snap2 = await getDocs(q2);
-
-      if (totalKillsList) {
-        totalKillsList.innerHTML = '';
-        if (snap2.empty) {
-          totalKillsList.innerHTML = '<li style="color:#555; text-align:center;">Aucune légende.</li>';
-        } else {
-          let rank = 1;
-          snap2.forEach(doc => {
-            const d = doc.data();
-            // Show only if they have kills
-            if ((d.totalKills || 0) > 0) {
-              const li = document.createElement('li');
-              li.innerHTML = `<span>${rank}. ${d.pseudo}</span> <span>${d.totalKills}</span>`;
-              totalKillsList.appendChild(li);
-              rank++;
-            }
-          });
+      this.unsubTotal = onSnapshot(q2, (snap) => {
+        if (totalKillsList) {
+          totalKillsList.innerHTML = '';
+          if (snap.empty) {
+            totalKillsList.innerHTML = '<li style="color:#555; text-align:center;">Aucune légende.</li>';
+          } else {
+            let rank = 1;
+            snap.forEach(doc => {
+              const d = doc.data();
+              if ((d.totalKills || 0) > 0) {
+                const li = document.createElement('li');
+                li.innerHTML = `<span>${rank}. ${d.pseudo}</span> <span>${d.totalKills}</span>`;
+                totalKillsList.appendChild(li);
+                rank++;
+              }
+            });
+          }
         }
-      }
+      }, (error) => {
+        console.error("Total Kills RT Error:", error);
+      });
     } catch (e) {
-      console.error("Total Kills Error:", e);
-      if (totalKillsList) totalKillsList.innerHTML = '<li style="color:red; font-size:0.7rem;">Erreur index (totalKills).</li>';
+      console.error("Setup Total Kills Listener Error:", e);
     }
   }
 
@@ -1955,5 +1959,7 @@ class Game {
 }
 
 window.onload = () => {
-  new Game();
+  const game = new Game();
+  // Show leaderboard immediately (before login)
+  game.updateLeaderboard();
 };
