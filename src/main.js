@@ -27,8 +27,22 @@ const CONF = {
     TYPE5: { color: '#ff00ff', radius: 10, hp: 40, speed: 1.1, score: 40, gold: 2, name: "Spectre", desc: "Se téléporte aléatoirement." },
     TYPE6: { color: 'rgba(200, 200, 255, 0.4)', radius: 12, hp: 60, speed: 1.65, score: 60, gold: 4, phase: true, name: "Fantôme", desc: "Invulnérable quand tu bouges !" },
     TYPE7: { color: '#ff0000', radius: 14, hp: 50, speed: 0.55, score: 45, gold: 5, name: "Laser", desc: "Charge un rayon mortel global." },
-    BOSS: { color: '#ffffff', radius: 40, hp: 1000, speed: 0.88, score: 500, gold: 50, name: "RSB-01", desc: "Le patron ultime." },
+    TYPE8: { color: '#9900ff', radius: 15, hp: 80, speed: 1.5, score: 55, gold: 4, name: "Méduse", desc: "Tir lent autoguidé style zigzag.", projectileSpeed: 2.5 },
+    BOSS: { color: '#ffffff', radius: 40, hp: 850, speed: 0.88, score: 500, gold: 50, name: "RSB-01", desc: "Le patron ultime." },
   },
+  // ... (Skipping middle of file updates for cleaner multiple replace tools if needed, but I will try to do it via multi-call if block is contiguous)
+  // Actually I need to update multiple places.
+  // 1. CONF (around line 30)
+  // 2. Enemy class constructor (logic for Medusa props if needed, but generic props usually handle it) -> actually Enemy logic needs specific update for ZigZag shot.
+  // 3. Enemy update (Medusa shooting logic)
+  // 4. Game upgrades (around line 930)
+
+  // I will make this tool call Update CONF and UPGRADES first because they are far apart.
+  // Actually, `replace_file_content` is for single block.
+  // I can use `multi_replace_file_content`!
+
+  // Let's use `multi_replace_file_content`.
+
   WAVE: {
     baseCount: 15,
     spawnInterval: 50,
@@ -207,11 +221,21 @@ class Projectile {
     this.color = color;
     this.isEnemy = isEnemy;
     this.markedForDeletion = false;
+    this.isZigZag = false;
+    this.zigzagTimer = 0;
+    this.zigzagBaseAngle = angle;
   }
 
   update(worldWidth, worldHeight) {
-    this.x += this.vx;
-    this.y += this.vy;
+    if (this.isZigZag) {
+      this.zigzagTimer += 0.2;
+      const wave = Math.sin(this.zigzagTimer) * 2; // Amplitude
+      this.x += Math.cos(this.zigzagBaseAngle) * 3 + Math.cos(this.zigzagBaseAngle + Math.PI / 2) * wave;
+      this.y += Math.sin(this.zigzagBaseAngle) * 3 + Math.sin(this.zigzagBaseAngle + Math.PI / 2) * wave;
+    } else {
+      this.x += this.vx;
+      this.y += this.vy;
+    }
 
     if (this.x < 0 || this.x > worldWidth || this.y < 0 || this.y > worldHeight) {
       this.markedForDeletion = true;
@@ -437,16 +461,28 @@ class Enemy {
         this.x = Math.max(0, Math.min(worldW, this.x));
         this.y = Math.max(0, Math.min(worldH, this.y));
       }
+    } else if (this.type === 'TYPE8') { // Méduse
+      // Always shoot towards player
+      this.cooldown--;
+      if (this.cooldown <= 0) {
+        // ZigZag Shot
+        const a = Math.atan2(player.y - this.y, player.x - this.x);
+        const p = new Projectile(this.x, this.y, a, 12, this.projectileSpeed, '#e0ffff', true);
+        p.isZigZag = true;
+        p.zigzagBaseAngle = a;
+        gameProjectiles.push(p);
+        this.cooldown = 150; // Slow fire rate
+      }
     } else if (this.type === 'BOSS') {
       this.cooldown--;
       this.bossAngle += 0.02;
       if (this.cooldown <= 0) {
         let baseShots = 8;
         let extraShots = Math.floor(waveLevel / 10);
-        let shots = Math.min(24, baseShots + extraShots); // Cap at 24 shots
+        let shots = Math.min(24, baseShots + extraShots);
 
-        let cdBase = 100;
-        if (waveLevel >= 10) cdBase = 85;
+        let cdBase = 80; // Default faster (was 100)
+        if (waveLevel >= 10) cdBase = 65; // Even faster later
 
         for (let i = 0; i < shots; i++) {
           const a = this.bossAngle + (Math.PI * 2 * i) / shots;
@@ -927,18 +963,11 @@ class Game {
         getValue: (p) => p.maxHp, getNext: (p) => Math.min(150, p.maxHp + 5),
         apply: (p) => { if (p.maxHp < 150) p.upgrade('maxHp', 5); }
       },
-
       {
-        id: 'heal', name: 'Pack de Soin', desc: 'Soin immédiat (+50 HP)', cost: 100, costMult: 1.0, isConsumable: true,
+        id: 'heal', name: 'Pack de Soin', desc: 'Soin léger (+10 HP)', cost: 250, costMult: 1.0, isConsumable: true,
         getValue: (p) => Math.floor(p.hp) + '/' + Math.floor(p.maxHp), getNext: (p) => "Max",
-        apply: (p) => p.heal(50)
-      },
-
-      {
-        id: 'multi', name: 'Tir Latéral', desc: 'Ajoute 1 canon sur le côté', cost: 200, costMult: 100, maxLevel: 1,
-        getValue: (p) => p.multiShot + 'x', getNext: (p) => (p.multiShot + 1) + 'x',
-        apply: (p) => p.upgrade('multiShot', 1)
-      },
+        apply: (p) => p.heal(10)
+      }
     ];
     this.shopLevels = {};
     this.upgrades.forEach(u => this.shopLevels[u.id] = 1);
@@ -1202,15 +1231,30 @@ class Game {
       }
     }
 
-    const r = Math.random();
-    let type = 'TYPE1';
-    if (this.wave > 1 && r > 0.7) type = 'TYPE2';
-    if (this.wave > 2 && r > 0.85) type = 'TYPE4';
-    if (this.wave > 4 && r > 0.90) type = 'TYPE5';
-    if (this.wave > 3 && r > 0.95) type = 'TYPE3';
-    if (this.wave > 4 && r > 0.92 && r < 0.97) type = 'TYPE6';
-    // Laser Enemy Chance > Wave 6
-    if (this.wave > 6 && r > 0.88 && r < 0.92) type = 'TYPE7';
+    // Progressive Unlock Logic (1 new enemy per wave up to 8)
+    const availableTypes = ['TYPE1'];
+    if (this.wave >= 2) availableTypes.push('TYPE2'); // Scout
+    if (this.wave >= 3) availableTypes.push('TYPE3'); // Tank
+    if (this.wave >= 4) availableTypes.push('TYPE4'); // Sniper
+    if (this.wave >= 5) availableTypes.push('TYPE5'); // Spectre
+    if (this.wave >= 6) availableTypes.push('TYPE6'); // Ghost
+    if (this.wave >= 7) availableTypes.push('TYPE7'); // Laser
+    if (this.wave >= 8) availableTypes.push('TYPE8'); // Medusa
+
+    // Higher chance for lower tier enemies to keep horde feel, 
+    // but ensure new types spawn.
+    // Simple random pick ensures checking new enemies.
+    let type = availableTypes[Math.floor(Math.random() * availableTypes.length)];
+
+    // Slight bias: standard drone always has extra entry to maintain swarm feel?
+    // User wants to discover new enemies, so simple random is better for visibility.
+    // If we want slightly more balance:
+    if (Math.random() < 0.3) type = 'TYPE1'; // 30% always fodder logic?
+    // Actually, let's stick to simple random from available pool so Medusa (1/8 chance at wave 8) appears often enough (approx 2 per 15 spawns).
+    // If I use pure random `availableTypes`, at wave 8: 1/8 chance. 15 enemies -> ~2 Medusas. Perfect.
+
+    // Override previously derived type to use the selected one.
+    type = availableTypes[Math.floor(Math.random() * availableTypes.length)];
 
     if (!CONF.ENEMIES[type]) type = 'TYPE1';
 
@@ -1630,8 +1674,18 @@ class Game {
     if (performance.now() % 500 < 20) this.checkShopButton();
 
     this.waveTimer++;
-    if (this.waveTimer > CONF.WAVE.spawnInterval && this.enemiesSpawned < this.enemiesToSpawn) {
+
+    // Wave 15+ Difficulty (Faster Spawns)
+    let dynamicInterval = CONF.WAVE.spawnInterval;
+    if (this.wave >= 15) dynamicInterval = 35; // Significantly faster (was 50)
+    if (this.wave >= 25) dynamicInterval = 25;
+
+    if (this.waveTimer > dynamicInterval && this.enemiesSpawned < this.enemiesToSpawn) {
+      // Spawn Mix
       this.spawnEnemy();
+      // Chance for double spawn at higher waves
+      if (this.wave >= 15 && Math.random() < 0.3) this.spawnEnemy();
+
       this.enemiesSpawned++;
       this.waveTimer = 0;
     }
