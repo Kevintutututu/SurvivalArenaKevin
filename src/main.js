@@ -655,6 +655,7 @@ class UserManager {
         pin: pin,
         bestScore: 0,
         totalGames: 0,
+        totalKills: 0,
         createdAt: serverTimestamp()
       });
       return true;
@@ -694,9 +695,15 @@ class UserManager {
       if (userSnap.exists()) {
         const data = userSnap.data();
         const updates = {
-          totalGames: increment(1),
-          totalKills: increment(kills) // CUMULATIVE KILLS
+          totalGames: increment(1)
         };
+
+        // Fix for missing totalKills field
+        if (data.totalKills === undefined) {
+          updates.totalKills = kills;
+        } else {
+          updates.totalKills = increment(kills);
+        }
         if (kills > (data.bestScore || 0)) {
           updates.bestScore = kills;
         }
@@ -1500,7 +1507,8 @@ class Game {
 
     // 2. LÉGENDES (Total Kills Cumulative)
     try {
-      const q2 = query(collection(db, "users"), orderBy("totalKills", "desc"), limit(5));
+      // Increased limit to show more players (effectively "everyone" for this scale)
+      const q2 = query(collection(db, "users"), orderBy("totalKills", "desc"), limit(100));
       this.unsubTotal = onSnapshot(q2, (snap) => {
         if (totalKillsList) {
           totalKillsList.innerHTML = '';
