@@ -21,53 +21,54 @@
       <!-- HUD -->
       <div id="hud" class="hidden">
         <!-- Top Bar -->
-        <div class="hud-top">
-          <div class="hud-left">
-            <div class="hud-item wave-item">
-              <span class="label">VAGUE</span>
-              <span id="waveValue">1</span>
-            </div>
-            <div class="hud-item kill-item-total">
-              <span class="label">TOTAL TUÉS</span>
-              <span id="sessionKillsValue">0</span>
-            </div>
-            <!-- Wave Progress -->
-            <div class="hud-item kill-item-wave">
-              <span class="label">PROGRESSION</span>
-              <div class="wave-progress-text">
-                <span id="killsValue">0</span> / <span id="totalEnemiesValue">0</span>
-              </div>
-            </div>
+        <div class="hud-top" style="justify-content: space-between; gap: 0.5rem; width: 100%;">
+
+          <!-- 1. VAGUE -->
+          <div class="hud-item wave-item">
+            <span class="label">VAGUE</span>
+            <div><span id="waveValue" style="font-size: 1.5rem; font-weight: bold; color: #ff3e3e;">1</span></div>
           </div>
 
-          <div class="hud-center">
-            <div class="xp-container">
-              <div class="xp-bar-bg">
-                <div id="xpBarFill" class="xp-bar-fill"></div>
-              </div>
-              <div class="xp-text">NIV. <span id="levelValue">1</span></div>
-            </div>
+          <!-- 2. TOTAL TUÉS -->
+          <div class="hud-item">
+            <span class="label">TOTAL TUÉS</span>
+            <span id="sessionKillsValue">0</span>
           </div>
 
-          <div class="hud-right">
-            <div class="hud-item gold-item">
-              <span class="label">OR</span>
-              <span id="goldValue">0</span>
-            </div>
-
-            <div id="profile-display" class="hud-item profile-item">
-              <span class="label">COMPTE</span>
-              <span id="playerPseudo">INVITÉ</span>
-            </div>
-
-            <button id="monsterListBtn" class="hud-btn-small">
-              BESTIAIRE
-            </button>
-
-            <button id="ingameShopBtn" class="hud-btn">
-              MARCHÉ <span class="hotkey">[ESPACE]</span>
-            </button>
+          <!-- 3. PROGRESSION -->
+          <div class="hud-item">
+            <span class="label">PROGRESSION</span>
+            <div><span id="killsValue">0</span> / <span id="totalEnemiesValue">0</span></div>
           </div>
+
+          <!-- 4. NIVEAU (Reduced width) -->
+          <div class="xp-container" style="width: 80px; flex-direction: column;">
+            <div class="xp-bar-bg" style="width: 100%;">
+              <div id="xpBarFill" class="xp-bar-fill"></div>
+            </div>
+            <div class="xp-text" style="font-size: 0.7rem; margin-top: 2px;">NIV. <span id="levelValue">1</span></div>
+          </div>
+
+          <!-- 5. BESTIAIRE (Renamed) -->
+          <button id="monsterListBtn" class="hud-btn" style="font-size: 0.6rem; padding: 0.3rem 0.6rem;">
+            LISTE ET DÉFINITION DES ENNEMIES
+          </button>
+
+          <!-- 6. PSEUDO -->
+          <div id="profile-display" class="hud-item profile-item">
+            <span id="playerPseudo">INVITÉ</span>
+          </div>
+
+          <!-- 7. OR -->
+          <div class="hud-item gold-item">
+            <span class="label">OR</span>
+            <span id="goldValue">0</span>
+          </div>
+
+          <!-- 8. SHOP (Renamed) -->
+          <button id="ingameShopBtn" class="hud-btn">
+            AMÉLIORATION
+          </button>
         </div>
       </div>
 
@@ -91,7 +92,7 @@
 
           <p id="login-error" class="error-msg"></p>
           <button id="loginBtn" class="primary-btn">CONNEXION</button>
-          <div style="margin-top:20px; color:#444; font-size:0.75rem; font-weight:bold;">v1.7.2 - Legend Fix</div>
+          <div style="margin-top:20px; color:#444; font-size:0.75rem; font-weight:bold;">v1.7.4 - UI & Lag Fix</div>
         </div>
       </div>
 
@@ -122,6 +123,30 @@
         <button id="closeMonsterListBtn" class="primary-btn">FERMER</button>
       </div>
 
+      <!-- All Rankings Modal -->
+      <div id="all-rankings-modal" class="screen hidden">
+        <h2>CLASSEMENTS MONDIAUX</h2>
+        <div class="rankings-grid-container">
+          <div class="rank-col">
+            <h3>TOP TUEURS (SCORE)</h3>
+            <ul id="rank-modal-best" class="ranking-list"></ul>
+          </div>
+          <div class="rank-col">
+            <h3>LÉGENDES (TOTAL KILLS)</h3>
+            <ul id="rank-modal-total" class="ranking-list"></ul>
+          </div>
+          <div class="rank-col">
+            <h3>SURVIVANTS (VAGUE)</h3>
+            <ul id="rank-modal-wave" class="ranking-list"></ul>
+          </div>
+          <div class="rank-col">
+            <h3>DERNIÈRES PARTIES</h3>
+            <ul id="rank-modal-history" class="ranking-list"></ul>
+          </div>
+        </div>
+        <button id="closeAllRankingsBtn" class="primary-btn">FERMER</button>
+      </div>
+
       <!-- Countdown Overlay -->
       <div id="countdown-overlay" class="overlay hidden">
         <div class="countdown-number" id="countdownValue">3</div>
@@ -146,7 +171,18 @@
           </div>
         </div>
 
-        <button id="startBtn" class="primary-btn">JOUER</button>
+        <div class="start-options">
+          <div class="option-block">
+            <button id="startBtn" class="primary-btn">NOUVELLE PARTIE</button>
+            <p class="option-desc">Départ vague 1. Progression classique.</p>
+          </div>
+          <div class="option-block" id="continueBlock">
+            <button id="continueBtn" class="primary-btn secondary-btn">REPRENDRE (VAGUE <span
+                id="bestWaveVal">1</span>)</button>
+            <p class="option-desc">Départ vague record. <span class="warning">⚠️ 0 Or, 0 Améliorations, 0 Score.</span>
+            </p>
+          </div>
+        </div>
       </div>
 
       <!-- Shop Screen -->
@@ -169,7 +205,16 @@
         <div class="final-stats">
           <p class="final-stat-big"><span id="finalKills">0</span> VICTIMES</p>
         </div>
-        <button id="restartBtn" class="primary-btn">REJOUER</button>
+        <div class="start-options">
+          <div class="option-block">
+            <button id="restartBtn" class="primary-btn">REJOUER (VAGUE 1)</button>
+          </div>
+          <div class="option-block" id="restartContinueBlock">
+            <button id="restartContinueBtn" class="primary-btn secondary-btn">REJOUER (VAGUE <span
+                id="bestWaveValOver">1</span>)</button>
+            <p class="option-desc" style="font-size:0.7rem; margin-top:5px;">Mode Difficile: 0 Or/Stuff</p>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -184,17 +229,12 @@
         <div class="ranking-content">
           <div class="ranking-section">
             <h3>TOP TUEURS (PARTIE)</h3>
-            <ul class="ranking-list" id="rank-game">
+            <ul class="ranking-list" id="rank-game-sidebar">
               <li style="color:#555; text-align:center; font-style:italic;">Chargement...</li>
             </ul>
           </div>
-
-          <div class="ranking-section">
-            <h3>LÉGENDES (TOTAL)</h3>
-            <ul class="ranking-list" id="rank-total">
-              <li style="color:#555; text-align:center; font-style:italic;">Chargement...</li>
-            </ul>
-          </div>
+          <button id="showAllRankingsBtn" class="hud-btn"
+            style="width:100%; margin-top:10px; justify-content:center;">VOIR TOUT</button>
         </div>
       </div>
 

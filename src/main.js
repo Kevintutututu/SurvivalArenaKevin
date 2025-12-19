@@ -1,4 +1,5 @@
 import './style.css'
+import { SoundManager } from './sound.js';
 import { db } from './firebase.js';
 import { collection, doc, setDoc, getDoc, updateDoc, increment, addDoc, query, orderBy, limit, onSnapshot, serverTimestamp, getDocs, where } from "firebase/firestore";
 
@@ -247,11 +248,6 @@ class Projectile {
     ctx.beginPath();
     ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
     ctx.fill();
-
-    ctx.shadowBlur = 10;
-    ctx.shadowColor = this.color;
-    ctx.fill();
-    ctx.shadowBlur = 0;
   }
 }
 
@@ -567,8 +563,9 @@ class Enemy {
       }
     }
 
-    ctx.shadowBlur = 10;
-    ctx.shadowColor = this.color;
+    // Optimized: Removed shadowBlur for performance
+    // ctx.shadowBlur = 10; 
+    // ctx.shadowColor = this.color;
     ctx.fillStyle = this.color;
 
     if (this.type === 'TYPE3') {
@@ -654,6 +651,7 @@ class UserManager {
         pseudo: pseudo,
         pin: pin,
         bestScore: 0,
+        bestWave: 1, // New Field
         totalGames: 0,
         totalKills: 0,
         createdAt: serverTimestamp()
@@ -707,6 +705,10 @@ class UserManager {
         if (kills > (data.bestScore || 0)) {
           updates.bestScore = kills;
         }
+        // Update Best Wave
+        if (wave > (data.bestWave || 1)) {
+          updates.bestWave = wave;
+        }
         await updateDoc(userRef, updates);
 
         // Update local currentUser
@@ -714,6 +716,7 @@ class UserManager {
           this.currentUser.totalGames = (this.currentUser.totalGames || 0) + 1;
           this.currentUser.totalKills = (this.currentUser.totalKills || 0) + kills;
           if (kills > this.currentUser.bestScore) this.currentUser.bestScore = kills;
+          if (wave > (this.currentUser.bestWave || 1)) this.currentUser.bestWave = wave;
         }
       }
 
@@ -894,6 +897,35 @@ class Game {
     this.userManager = new UserManager();
     this.chat = new ChatProject(this);
 
+    // Cache UI Elements for Performance
+    this.ui = {
+      kills: $('#killsValue'),
+      sessionKills: $('#sessionKillsValue'),
+      totalEnemies: $('#totalEnemiesValue'),
+      wave: $('#waveValue'),
+      gold: $('#goldValue'),
+      shopGold: $('#shopGold'),
+      xpBar: $('#xpBarFill'),
+      level: $('#levelValue'),
+      shopBtn: $('#ingameShopBtn'),
+      hud: $('#hud'),
+      nextWaveBtn: $('#nextWaveBtn')
+    };
+
+    // Setup Validation Fix: Wire Rankings Button immediately
+    const rankBtn = $('#showAllRankingsBtn');
+    if (rankBtn) rankBtn.onclick = () => this.openAllRankings();
+
+    const closeRankBtn = $('#closeAllRankingsBtn');
+    if (closeRankBtn) closeRankBtn.onclick = () => {
+      $('#all-rankings-modal').classList.add('hidden');
+      if (this.player && !this.player.isDead) this.state = 'PLAYING';
+      // If we are not playing (e.g. Login screen), do not change state to MENU if it was LOGIN
+      // Use logic similar to closeProfile
+      else if (this.state === 'PAUSED' && !this.userManager.currentUser) this.state = 'LOGIN'; // Fallback
+      else this.state = 'MENU';
+    };
+
     // Initial State
     this.state = 'LOGIN';
     this.setupLogin();
@@ -931,6 +963,12 @@ class Game {
     this.xpToNextLevel = 100;
 
     this.loop = this.loop.bind(this);
+    try {
+      this.sound = new SoundManager();
+    } catch (e) {
+      console.warn("Sound init failed:", e);
+      this.sound = null;
+    }
     requestAnimationFrame(this.loop);
 
     const bind = (id, fn) => { const el = $(id); if (el) el.onclick = fn; };
@@ -995,6 +1033,13 @@ class Game {
     });
     window.addEventListener('keyup', e => this.keys[e.code] = false);
     window.addEventListener('resize', () => this.resize());
+    window.addEventListener('blur', () => { this.keys = {}; });
+    window.addEventListener('click', (e) => {
+      if (this.sound && (e.target.tagName === 'BUTTON' || e.target.closest('button'))) {
+        this.sound.playClick();
+        this.sound.resume(); // Ensure context is resumed on click
+      }
+    });
   }
 
   resize() {
@@ -1007,7 +1052,7 @@ class Game {
     }
   }
 
-  startRestartSequence() {
+  startRestartSequence(startWave = 1) {
     const overlay = $('#countdown-overlay');
     const num = $('#countdownValue');
     if (overlay) overlay.classList.remove('hidden');
@@ -1020,14 +1065,14 @@ class Game {
       if (count <= 0) {
         clearInterval(intv);
         if (overlay) overlay.classList.add('hidden');
-        this.resetGame();
+        this.resetGame(startWave);
       } else {
         if (num) num.innerText = count;
       }
     }, 1000);
   }
 
-  resetGame() {
+  resetGame(startWave = 1) {
     this.player = new Player({ x: CONF.WORLD.WIDTH / 2, y: CONF.WORLD.HEIGHT / 2 });
     this.enemies = [];
     this.projectiles = [];
@@ -1051,7 +1096,7 @@ class Game {
     this.xp = 0;
     this.level = 1;
     this.xpToNextLevel = 100;
-    this.wave = 1;
+    this.wave = startWave; // Start at requested wave
 
     this.startGame();
   }
@@ -1121,8 +1166,8 @@ class Game {
     } else if (this.state === 'PLAYING') {
       this.state = 'SHOP';
       $('#shop-screen').classList.remove('hidden');
-      $('#shopGold').innerText = Math.floor(this.gold);
-      const btn = $('#nextWaveBtn');
+      if (this.ui.shopGold) this.ui.shopGold.innerText = Math.floor(this.gold);
+      const btn = this.ui.nextWaveBtn;
       if (btn) btn.innerHTML = 'RETOUR AU JEU <span style="font-size:0.5em; opacity:0.7">[ESPACE]</span>';
       this.renderShop();
     }
@@ -1219,7 +1264,7 @@ class Game {
       if (this.gold >= cost) canAfford = true;
     });
 
-    const btn = $('#ingameShopBtn');
+    const btn = this.ui.shopBtn;
     if (!btn) return;
     if (canAfford) btn.classList.add('can-buy');
     else btn.classList.remove('can-buy');
@@ -1289,6 +1334,7 @@ class Game {
 
       const range = 600;
       if (nearest && minDst < range) {
+        if (this.sound) this.sound.playShoot();
         const angle = Math.atan2(nearest.y - this.player.y, nearest.x - this.player.x);
         let speed = CONF.PLAYER.BASE_PROJECTILE_SPEED;
         let color = '#ffaaaa';
@@ -1424,10 +1470,34 @@ class Game {
 
     this.state = 'MENU';
     this.updateLeaderboard();
+
+    // Setup Continue Button Logic
+    const bestW = (this.userManager.currentUser.bestWave || 1);
+
+    // Start Screen Block
+    const cBlock = $('#continueBlock');
+    const cBenVal = $('#bestWaveVal');
+    const cBtn = $('#continueBtn');
+
+    if (bestW > 1) {
+      if (cBlock) cBlock.style.display = 'flex';
+      if (cBenVal) cBenVal.innerText = bestW;
+      if (cBtn) cBtn.onclick = () => this.startRestartSequence(bestW);
+    } else {
+      if (cBlock) cBlock.style.display = 'none';
+    }
+
+    // Normal Start
+    const startBtn = $('#startBtn');
+    if (startBtn) startBtn.onclick = () => this.startRestartSequence(1);
+
+    // Setup Game Over Continue Button logic as well (cached for later)
+    this.gameOverBestWave = bestW;
   }
 
   startGame() {
     try {
+      if (this.sound) this.sound.startAmbience();
       if (!this.player) this.resetGame();
 
       // Hide UI Screens
@@ -1464,22 +1534,14 @@ class Game {
   }
 
   updateLeaderboard() {
-    // REAL-TIME UPDATES via onSnapshot
-    // We replace getDocs with onSnapshot listeners.
-
-    const bestScoreList = $('#rank-game');
-    const totalKillsList = $('#rank-total');
-
+    // SIDEBAR ONLY: TOP TUEURS (Best Score Unique)
+    const bestScoreList = $('#rank-game-sidebar');
     if (bestScoreList && bestScoreList.innerHTML.includes('Chargement')) bestScoreList.innerHTML = '<li style="color:#888; text-align:center;">Chargement...</li>';
-    if (totalKillsList && totalKillsList.innerHTML.includes('Chargement')) totalKillsList.innerHTML = '<li style="color:#888; text-align:center;">Chargement...</li>';
 
-    // Unsubscribe previous listeners if any (to prevent duplicates)
     if (this.unsubBest) this.unsubBest();
-    if (this.unsubTotal) this.unsubTotal();
 
-    // 1. TOP TUEURS (Best Score Unique)
     try {
-      const q = query(collection(db, "users"), orderBy("bestScore", "desc"), limit(8));
+      const q = query(collection(db, "users"), orderBy("bestScore", "desc"), limit(10));
       this.unsubBest = onSnapshot(q, (snap) => {
         if (bestScoreList) {
           bestScoreList.innerHTML = '';
@@ -1504,35 +1566,73 @@ class Game {
     } catch (e) {
       console.error("Setup Best Score Listener Error:", e);
     }
+  }
 
-    // 2. LÉGENDES (Total Kills Cumulative)
-    try {
-      // Increased limit to show more players (effectively "everyone" for this scale)
-      const q2 = query(collection(db, "users"), orderBy("totalKills", "desc"), limit(100));
-      this.unsubTotal = onSnapshot(q2, (snap) => {
-        if (totalKillsList) {
-          totalKillsList.innerHTML = '';
-          if (snap.empty) {
-            totalKillsList.innerHTML = '<li style="color:#555; text-align:center;">Aucune légende.</li>';
-          } else {
-            let rank = 1;
-            snap.forEach(doc => {
-              const d = doc.data();
-              if ((d.totalKills || 0) > 0) {
-                const li = document.createElement('li');
-                li.innerHTML = `<span>${rank}. ${d.pseudo}</span> <span>${d.totalKills}</span>`;
-                totalKillsList.appendChild(li);
-                rank++;
-              }
-            });
-          }
-        }
-      }, (error) => {
-        console.error("Total Kills RT Error:", error);
+  async openAllRankings() {
+    const modal = $('#all-rankings-modal');
+    if (!modal) return;
+
+    // Pause Game if Playing
+    if (this.state === 'PLAYING') this.state = 'PAUSED';
+    modal.classList.remove('hidden');
+
+    const lists = {
+      best: $('#rank-modal-best'),
+      total: $('#rank-modal-total'),
+      wave: $('#rank-modal-wave'),
+      history: $('#rank-modal-history')
+    };
+
+    // Helper to render list
+    const render = (ul, data, formatter) => {
+      if (!ul) return;
+      ul.innerHTML = '';
+      if (data.length === 0) {
+        ul.innerHTML = '<li style="justify-content:center; color:#555;">Aucune donnée.</li>';
+        return;
+      }
+      data.forEach((d, i) => {
+        const li = document.createElement('li');
+        li.innerHTML = formatter(d, i + 1);
+        ul.appendChild(li);
       });
-    } catch (e) {
-      console.error("Setup Total Kills Listener Error:", e);
-    }
+    };
+
+    // 1. TOP TUEURS (Users -> bestScore)
+    getDocs(query(collection(db, "users"), orderBy("bestScore", "desc"), limit(20))).then(snap => {
+      const data = [];
+      snap.forEach(d => data.push(d.data()));
+      render(lists.best, data, (d, rank) => `<span>${rank}. ${d.pseudo}</span><span>${d.bestScore}</span>`);
+    });
+
+    // 2. LEGENDES (Users -> totalKills)
+    getDocs(query(collection(db, "users"), orderBy("totalKills", "desc"), limit(20))).then(snap => {
+      const data = [];
+      snap.forEach(d => data.push(d.data()));
+      render(lists.total, data, (d, rank) => `<span>${rank}. ${d.pseudo}</span><span>${d.totalKills}</span>`);
+    });
+
+    // 3. SURVIVANTS (Users -> bestWave)
+    getDocs(query(collection(db, "users"), orderBy("bestWave", "desc"), limit(20))).then(snap => {
+      const data = [];
+      snap.forEach(d => data.push(d.data()));
+      render(lists.wave, data, (d, rank) => `<span>${rank}. ${d.pseudo}</span><span>Vague ${d.bestWave || 1}</span>`);
+    });
+
+    // 4. HISTORIQUE (Games -> date)
+    getDocs(query(collection(db, "games"), orderBy("date", "desc"), limit(10))).then(snap => {
+      const data = [];
+      snap.forEach(d => data.push(d.data()));
+      render(lists.history, data, (d, rank) => {
+        // Format date: dd/mm
+        const date = d.date && d.date.toDate ? d.date.toDate() : new Date();
+        const day = date.getDate().toString().padStart(2, '0');
+        const month = (date.getMonth() + 1).toString().padStart(2, '0');
+        const dateStr = `${day}/${month}`;
+
+        return `<span>${dateStr} - ${d.pseudo}</span><span>${d.kills} Kills</span>`;
+      });
+    });
   }
 
   closeProfile() {
@@ -1683,7 +1783,7 @@ class Game {
     if (this.rageTimer > 0) this.rageTimer--;
     if (this.waveAnnounce) this.waveAnnounce.update();
 
-    if (performance.now() % 500 < 20) this.checkShopButton();
+    if (this.waveTimer % 30 === 0) this.checkShopButton(); // Check every ~0.5s (30 frames)
 
     this.waveTimer++;
 
@@ -1744,6 +1844,7 @@ class Game {
       if (dist(this.player.x, this.player.y, p.x, p.y) < this.player.radius + p.radius) {
         if (p.type === 'HEAL') {
           this.player.heal(10);
+          if (this.sound) this.sound.playHeal();
           this.spawnText(this.player.x, this.player.y, "+10 HP", "#00ff00");
         } else if (p.type === 'RAGE') {
           this.rageTimer = 600;
@@ -1813,6 +1914,7 @@ class Game {
         this.totalKills++;
         this.waveKills++;
         this.enemies.splice(i, 1);
+        if (this.sound) this.sound.playEnemyDeath();
         this.spawnParticles(e.x, e.y, e.color, 10);
         continue;
       }
@@ -1843,15 +1945,33 @@ class Game {
       if (this.userManager.currentUser && !this.scoreSaved) {
         this.userManager.addMatch(this.userManager.currentUser.pseudo, this.kills, this.wave);
         this.scoreSaved = true;
+        this.scoreSaved = true;
         this.updateLeaderboard(); // Refresh UI immediately
+        this.gameOverBestWave = Math.max(this.gameOverBestWave || 1, this.wave);
+      }
+
+      // Setup Game Over Buttons
+      const goCBlock = $('#restartContinueBlock');
+      const goCVal = $('#bestWaveValOver');
+      const goCBtn = $('#restartContinueBtn');
+      const rBtn = $('#restartBtn');
+
+      if (rBtn) rBtn.onclick = () => this.startRestartSequence(1);
+
+      if (this.gameOverBestWave > 1) {
+        if (goCBlock) goCBlock.style.display = 'flex';
+        if (goCVal) goCVal.innerText = this.gameOverBestWave;
+        if (goCBtn) goCBtn.onclick = () => this.startRestartSequence(this.gameOverBestWave);
+      } else {
+        if (goCBlock) goCBlock.style.display = 'none';
       }
     }
 
     const sv = $('#scoreValue'); if (sv) sv.classList.add('hidden');
-    const kv = $('#killsValue'); if (kv) kv.innerText = this.waveKills;
-    const tv = $('#sessionKillsValue'); if (tv) tv.innerText = this.totalKills;
-    const tev = $('#totalEnemiesValue'); if (tev) tev.innerText = this.enemiesToSpawn;
-    const gVal = $('#goldValue'); if (gVal) gVal.innerText = Math.floor(this.gold);
+    if (this.ui.kills) this.ui.kills.innerText = this.waveKills;
+    if (this.ui.sessionKills) this.ui.sessionKills.innerText = this.totalKills;
+    if (this.ui.totalEnemies) this.ui.totalEnemies.innerText = this.enemiesToSpawn;
+    if (this.ui.gold) this.ui.gold.innerText = Math.floor(this.gold);
   }
 
   draw() {
@@ -1923,9 +2043,9 @@ class Game {
     const size = 150;
     const scaleX = size / CONF.WORLD.WIDTH;
     const scaleY = size / CONF.WORLD.HEIGHT;
-    // Moved down to avoid sleek UI collision
+    // Top-Left Corner
     const x = 20;
-    const y = 220;
+    const y = 20;
 
     ctx.save();
     ctx.translate(x, y);
